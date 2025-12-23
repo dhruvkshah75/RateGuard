@@ -1,0 +1,17 @@
+{
+  "name": "rateguard-monorepo",
+  "version": "1.0.0",
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "dev:api": "bun run --cwd services/dashboard-api dev",
+    "dev:proxy": "bun run --cwd services/proxy dev",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
+  },
+  "dependencies": {
+    "typescript": "^5.0.0",
+    "bun-types": "latest"
+  }
+}
