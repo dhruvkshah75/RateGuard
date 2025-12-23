@@ -68,6 +68,7 @@ bun run src/index.ts                 # Runs on localhost:8080
 * Basic Proxy Setup
 * Distributed Rate Limiting (Fixed Window)
 * User Authentication (JWT)
+* API-Key Authentication (In Progress)
 * React Dashboard Integration (In Progress)
 
 ---
