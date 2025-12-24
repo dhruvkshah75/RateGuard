@@ -1,4 +1,4 @@
-# dashboard-api
+# analytics-worker
 
 To install dependencies:
 
