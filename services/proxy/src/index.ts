@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import Redis from 'ioredis';
 import { PrismaClient } from './generated/client';
+import { checkRateLimit } from './limiter';
 
 const prisma = new PrismaClient();
 
@@ -70,30 +71,27 @@ const app = new Elysia()
             };
 
             // "Heal" the cache (Save it back to Redis)
-            await redis.set(`apikey:${apiKey}`, JSON.stringify(config));
+            await redis.set(`apikey:${apiKey}`, JSON.stringify(config), 'EX', 3600);
             keyData = JSON.stringify(config);
         }   
 
         const config = JSON.parse(keyData);
-        const currentWindow = Math.floor(Date.now() / 1000 / config.window);
-        const counterKey = `usage:${apiKey}:${currentWindow}`;
 
+        // Use the sliding window rate limiter
+        const limitResult = await checkRateLimit(
+            redis,
+            apiKey,
+            config.limit,
+            config.window
+        );
 
-        const requestCount = await redis.incr(counterKey);
-        if (requestCount === 1) {
-            await redis.expire(counterKey, config.window);
-        }
-
-        // Get Time-To-Live (seconds remaining in current window)
-        const secondsLeft = await redis.ttl(counterKey);
-
-        // SET PROFESSIONAL HEADERS => We set these regardless of whether they are blocked or not
+        // SET PROFESSIONAL HEADERS
         set.headers['x-ratelimit-limit'] = config.limit.toString();
-        set.headers['x-ratelimit-remaining'] = Math.max(0, config.limit - requestCount).toString();
-        set.headers['x-ratelimit-reset'] = secondsLeft.toString();
+        set.headers['x-ratelimit-remaining'] = limitResult.remaining.toString();
+        set.headers['x-ratelimit-reset'] = config.window.toString();
 
         // ENFORCEMENT
-        if (requestCount > config.limit) {
+        if (limitResult.isBlocked) {
             set.status = 429;
             return { error: "Rate limit exceeded. Upgrade your plan for more capacity." };
         }
