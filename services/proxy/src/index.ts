@@ -69,7 +69,7 @@ const app = new Elysia()
                 isActive: dbKey.isActive
             };
 
-            // 3. "Heal" the cache (Save it back to Redis)
+            // "Heal" the cache (Save it back to Redis)
             await redis.set(`apikey:${apiKey}`, JSON.stringify(config));
             keyData = JSON.stringify(config);
         }   
