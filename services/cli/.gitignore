@@ -27,12 +27,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
-# Prisma generated client (auto-generated from schema)
-src/generated/
+# IntelliJ based IDEs
+.idea
 
-CLAUDE.md 
-
-
-
-
-
+# Finder (MacOS) folder config
+.DS_Store

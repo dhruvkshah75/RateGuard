@@ -1,5 +1,8 @@
 import { Elysia } from 'elysia';
 import Redis from 'ioredis';
+import { PrismaClient } from './generated/client';
+
+const prisma = new PrismaClient();
 
 const PORT = Bun.env.PORT;
 const REDIS_HOST = Bun.env.REDIS_HOST;
@@ -34,6 +37,93 @@ const app = new Elysia()
             return new Response('Redis connection failed', {status: 500})
         }
     })
+
+    .derive(async ({ headers, set }) => {
+        const apiKey = headers['x-api-key'];
+
+        if (!apiKey) {
+            set.status = 401;  // unauthorized 
+            return { error: "Missing API Key" };
+        }
+
+        let keyData = await redis.get(`apikey:${apiKey}`);
+
+        if (!keyData) {
+            console.log("Cache Miss! Checking Database...");
+            // 1. Check Postgres via Prisma
+            const dbKey = await prisma.apiKey.findUnique({
+                where: { key: apiKey },
+                include: { user: true }
+            });
+
+            if (!dbKey) {
+                // not in cache and not in cache 
+                set.status = 401;
+                return { error: "Invalid API Key" };
+            }
+
+            // 2. Format the config to match what the Proxy expects
+            const config = {
+                limit: dbKey.user.plan === 'PRO' ? 1000 : 10,
+                window: 60,
+                isActive: dbKey.isActive
+            };
+
+            // 3. "Heal" the cache (Save it back to Redis)
+            await redis.set(`apikey:${apiKey}`, JSON.stringify(config));
+            keyData = JSON.stringify(config);
+        }   
+
+        const config = JSON.parse(keyData);
+        const currentWindow = Math.floor(Date.now() / 1000 / config.window);
+        const counterKey = `usage:${apiKey}:${currentWindow}`;
+
+
+        const requestCount = await redis.incr(counterKey);
+        if (requestCount === 1) {
+            await redis.expire(counterKey, config.window);
+        }
+
+        // Get Time-To-Live (seconds remaining in current window)
+        const secondsLeft = await redis.ttl(counterKey);
+
+        // SET PROFESSIONAL HEADERS => We set these regardless of whether they are blocked or not
+        set.headers['x-ratelimit-limit'] = config.limit.toString();
+        set.headers['x-ratelimit-remaining'] = Math.max(0, config.limit - requestCount).toString();
+        set.headers['x-ratelimit-reset'] = secondsLeft.toString();
+
+        // ENFORCEMENT
+        if (requestCount > config.limit) {
+            set.status = 429;
+            return { error: "Rate limit exceeded. Upgrade your plan for more capacity." };
+        }
+
+        return { keyConfig: config };
+    })
+
+
+    .all('/*', async ({ path, request }) => {
+        // We forward all valid requests to JSONPlaceholder (Mock API)
+        const TARGET_URL = `https://jsonplaceholder.typicode.com${path}`;
+        
+        console.log(`[Proxy] Forwarding request to: ${TARGET_URL}`);
+
+        try {
+            const response = await fetch(TARGET_URL, {
+                method: request.method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            // Return the data directly from the target
+            return await response.json();
+        } 
+        catch (e) {
+            return { error: "Destination API unreachable" };
+        }
+    })
+
     .listen(parseInt(PORT));
 
     // The path: http://localhost:8080/ => this will return the RateGuard proxy is running 
